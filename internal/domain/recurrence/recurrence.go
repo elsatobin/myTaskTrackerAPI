@@ -2,27 +2,22 @@ package recurrence
 
 import "time"
 
-// RecurrenceRule defines how tasks are generated over time.
+
 type RecurrenceRule struct {
 	ID string
 
 	Type RecurrenceType
 
-	// For daily recurrence (every N days)
 	Interval int
 
-	// For monthly recurrence (e.g. 1, 15, 30)
 	DaysOfMonth []int
 
-	// For specific dates recurrence
 	SpecificDates []time.Time
 
-	// For even/odd day rules
 	EvenOdd string // "even" or "odd"
 
 	StartDate time.Time
 
-	// Optional end date
 	EndDate *time.Time
 }
 
@@ -59,4 +54,44 @@ func (r RecurrenceRule) IsActive(date time.Time) bool {
 	}
 
 	return true
+}
+
+func (r *RecurrenceRule) NextRun(from time.Time) *time.Time {
+	switch r.Type {
+
+	case Daily:
+		next := from.AddDate(0, 0, r.Interval)
+		return &next
+
+	case Monthly:
+		if len(r.DaysOfMonth) == 0 {
+			return nil
+		}
+		day := r.DaysOfMonth[0]
+		next := time.Date(from.Year(), from.Month()+1, day, 0, 0, 0, 0, from.Location())
+		return &next
+
+	case Specific:
+		for _, d := range r.SpecificDates {
+			if d.After(from) {
+				return &d
+			}
+		}
+		return nil
+
+	case EvenOdd:
+		next := from
+		for {
+			next = next.AddDate(0, 0, 1)
+
+			if r.EvenOdd == "even" && next.Day()%2 == 0 {
+				return &next
+			}
+			if r.EvenOdd == "odd" && next.Day()%2 == 1 {
+				return &next
+			}
+		}
+	}
+
+	return nil
 }
