@@ -3,12 +3,13 @@ package task
 import (
 	"context"
 
-	taskdomain "example.com/taskservice/internal/domain/task"
 	"example.com/taskservice/internal/domain/recurrence"
+	taskdomain "example.com/taskservice/internal/domain/task"
 )
 
 type Repository interface {
 	Create(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error)
+	CreateMany(ctx context.Context, tasks []*taskdomain.Task) ([]*taskdomain.Task, error)
 	GetByID(ctx context.Context, id int64) (*taskdomain.Task, error)
 	Update(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error)
 	Delete(ctx context.Context, id int64) error
@@ -23,6 +24,9 @@ type Usecase interface {
 	List(ctx context.Context) ([]taskdomain.Task, error)
 	// Occurrences returns all scheduled dates for a task in [from, to].
 	Occurrences(ctx context.Context, id int64, from, to string) ([]string, error)
+	// Expand materializes individual task instances for each occurrence of a
+	// recurring task in [from, to] and persists them. Returns the created tasks.
+	Expand(ctx context.Context, id int64, from, to string) ([]*taskdomain.Task, error)
 }
 
 type CreateInput struct {

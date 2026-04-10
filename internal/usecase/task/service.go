@@ -82,6 +82,59 @@ func (s *Service) List(ctx context.Context) ([]domain.Task, error) {
 	return s.repo.List(ctx)
 }
 
+// Expand materializes individual task instances for each occurrence of a recurring
+// task in [from, to] and persists them. Each instance gets the due_date of its
+// occurrence and no recurrence rule of its own (it is a concrete task, not a template).
+func (s *Service) Expand(ctx context.Context, id int64, from, to string) ([]*domain.Task, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+	}
+
+	template, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if template.Recurrence == nil {
+		return nil, fmt.Errorf("%w: task has no recurrence rule", ErrInvalidInput)
+	}
+
+	fromT, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid from date: %s", ErrInvalidInput, from)
+	}
+
+	toT, err := time.Parse("2006-01-02", to)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid to date: %s", ErrInvalidInput, to)
+	}
+
+	if toT.Before(fromT) {
+		return nil, fmt.Errorf("%w: to must be >= from", ErrInvalidInput)
+	}
+
+	dates := template.Recurrence.Occurrences(fromT, toT)
+	if len(dates) == 0 {
+		return []*domain.Task{}, nil
+	}
+
+	now := s.now()
+	instances := make([]*domain.Task, len(dates))
+	for i, d := range dates {
+		due := d // capture
+		instances[i] = &domain.Task{
+			Title:       template.Title,
+			Description: template.Description,
+			Status:      domain.StatusNew,
+			DueDate:     &due,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+	}
+
+	return s.repo.CreateMany(ctx, instances)
+}
+
 // Occurrences returns all scheduled dates for a task in the given date range.
 // from and to are expected as "2006-01-02" (date only).
 func (s *Service) Occurrences(ctx context.Context, id int64, from, to string) ([]string, error) {

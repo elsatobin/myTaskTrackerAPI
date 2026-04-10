@@ -142,6 +142,37 @@ func (h *TaskHandler) Occurrences(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string][]string{"dates": dates})
 }
 
+// Expand materializes task instances for each occurrence of a recurring task in [from, to].
+// Query params: from=2006-01-02&to=2006-01-02
+func (h *TaskHandler) Expand(w http.ResponseWriter, r *http.Request) {
+	id, err := getIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+
+	if from == "" || to == "" {
+		writeError(w, http.StatusBadRequest, errors.New("from and to query params are required (YYYY-MM-DD)"))
+		return
+	}
+
+	tasks, err := h.usecase.Expand(r.Context(), id, from, to)
+	if err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	response := make([]taskDTO, len(tasks))
+	for i, t := range tasks {
+		response[i] = newTaskDTO(t)
+	}
+
+	writeJSON(w, http.StatusCreated, response)
+}
+
 func getIDFromRequest(r *http.Request) (int64, error) {
 	rawID := mux.Vars(r)["id"]
 	if rawID == "" {

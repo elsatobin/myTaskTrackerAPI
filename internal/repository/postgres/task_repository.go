@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	taskdomain "example.com/taskservice/internal/domain/task"
 	"example.com/taskservice/internal/domain/recurrence"
+	taskdomain "example.com/taskservice/internal/domain/task"
 )
 
 type Repository struct {
@@ -22,9 +22,9 @@ func New(pool *pgxpool.Pool) *Repository {
 
 func (r *Repository) Create(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error) {
 	const query = `
-		INSERT INTO tasks (title, description, status, recurrence, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, title, description, status, recurrence, created_at, updated_at
+		INSERT INTO tasks (title, description, status, recurrence, due_date, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, title, description, status, recurrence, due_date, created_at, updated_at
 	`
 
 	recJSON, err := marshalRecurrence(task.Recurrence)
@@ -33,16 +33,61 @@ func (r *Repository) Create(ctx context.Context, task *taskdomain.Task) (*taskdo
 	}
 
 	row := r.pool.QueryRow(ctx, query,
-		task.Title, task.Description, task.Status, recJSON,
+		task.Title, task.Description, task.Status, recJSON, task.DueDate,
 		task.CreatedAt, task.UpdatedAt,
 	)
 
 	return scanTask(row)
 }
 
+// CreateMany inserts multiple tasks in a single transaction and returns them.
+func (r *Repository) CreateMany(ctx context.Context, tasks []*taskdomain.Task) ([]*taskdomain.Task, error) {
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	const query = `
+		INSERT INTO tasks (title, description, status, recurrence, due_date, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, title, description, status, recurrence, due_date, created_at, updated_at
+	`
+
+	result := make([]*taskdomain.Task, 0, len(tasks))
+	for _, t := range tasks {
+		recJSON, err := marshalRecurrence(t.Recurrence)
+		if err != nil {
+			return nil, err
+		}
+
+		row := tx.QueryRow(ctx, query,
+			t.Title, t.Description, t.Status, recJSON, t.DueDate,
+			t.CreatedAt, t.UpdatedAt,
+		)
+
+		created, err := scanTask(row)
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, created)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (r *Repository) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
 	const query = `
-		SELECT id, title, description, status, recurrence, created_at, updated_at
+		SELECT id, title, description, status, recurrence, due_date, created_at, updated_at
 		FROM tasks WHERE id = $1
 	`
 
@@ -61,9 +106,9 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*taskdomain.Task, e
 func (r *Repository) Update(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error) {
 	const query = `
 		UPDATE tasks
-		SET title = $1, description = $2, status = $3, recurrence = $4, updated_at = $5
-		WHERE id = $6
-		RETURNING id, title, description, status, recurrence, created_at, updated_at
+		SET title = $1, description = $2, status = $3, recurrence = $4, due_date = $5, updated_at = $6
+		WHERE id = $7
+		RETURNING id, title, description, status, recurrence, due_date, created_at, updated_at
 	`
 
 	recJSON, err := marshalRecurrence(task.Recurrence)
@@ -72,7 +117,7 @@ func (r *Repository) Update(ctx context.Context, task *taskdomain.Task) (*taskdo
 	}
 
 	row := r.pool.QueryRow(ctx, query,
-		task.Title, task.Description, task.Status, recJSON,
+		task.Title, task.Description, task.Status, recJSON, task.DueDate,
 		task.UpdatedAt, task.ID,
 	)
 
@@ -104,7 +149,7 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 
 func (r *Repository) List(ctx context.Context) ([]taskdomain.Task, error) {
 	const query = `
-		SELECT id, title, description, status, recurrence, created_at, updated_at
+		SELECT id, title, description, status, recurrence, due_date, created_at, updated_at
 		FROM tasks ORDER BY id DESC
 	`
 
@@ -143,6 +188,7 @@ func scanTask(scanner taskScanner) (*taskdomain.Task, error) {
 		&task.Description,
 		&status,
 		&recBytes,
+		&task.DueDate,
 		&task.CreatedAt,
 		&task.UpdatedAt,
 	); err != nil {

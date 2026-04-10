@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -72,16 +71,10 @@ type config struct {
 }
 
 func loadConfig() config {
-	cfg := config{
+	return config{
 		HTTPAddr:    envOrDefault("HTTP_ADDR", ":8081"),
 		DatabaseDSN: envOrDefault("DATABASE_DSN", "postgres://postgres:postgres@localhost:5432/taskservice?sslmode=disable"),
 	}
-
-	if cfg.DatabaseDSN == "" {
-		panic(fmt.Errorf("DATABASE_DSN is required"))
-	}
-
-	return cfg
 }
 
 func envOrDefault(key, fallback string) string {

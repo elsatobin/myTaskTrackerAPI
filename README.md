@@ -79,7 +79,7 @@ Other recurrence examples:
 { "type": "even_odd", "even_odd": "even", "start_date": "2026-04-01" }
 ```
 
-### Get scheduled occurrences
+### Get scheduled occurrences (preview only)
 
 ```
 GET /api/v1/tasks/{id}/occurrences?from=2026-04-01&to=2026-04-30
@@ -88,12 +88,23 @@ GET /api/v1/tasks/{id}/occurrences?from=2026-04-01&to=2026-04-30
 Response:
 
 ```json
-{
-  "dates": ["2026-04-01", "2026-04-03", "2026-04-05", "..."]
-}
+{ "dates": ["2026-04-01", "2026-04-03", "2026-04-05"] }
 ```
 
-Returns an empty array for tasks without recurrence.
+Returns an empty array for tasks without recurrence. Does not create anything.
+
+### Expand — materialize task instances
+
+```
+POST /api/v1/tasks/{id}/expand?from=2026-04-01&to=2026-04-30
+```
+
+Creates individual task rows for each occurrence in the given range. Each created task has:
+- `status: "new"`
+- `due_date` set to its scheduled date
+- no recurrence rule (it is a concrete instance, not a template)
+
+Returns the array of created tasks. The original recurring task is unchanged.
 
 ### Other endpoints
 

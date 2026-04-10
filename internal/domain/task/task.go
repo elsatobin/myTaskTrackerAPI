@@ -29,6 +29,9 @@ type Task struct {
 	Description string
 	Status      Status
 	Recurrence  *recurrence.Recurrence
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// DueDate is set on tasks that were materialized from a recurrence rule.
+	// It represents the specific date this task instance is scheduled for.
+	DueDate   *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

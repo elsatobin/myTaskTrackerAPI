@@ -117,6 +117,7 @@ type taskDTO struct {
 	Description string                 `json:"description"`
 	Status      taskdomain.Status      `json:"status"`
 	Recurrence  *recurrenceResponseDTO `json:"recurrence,omitempty"`
+	DueDate     *string                `json:"due_date,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
 }
@@ -129,6 +130,11 @@ func newTaskDTO(task *taskdomain.Task) taskDTO {
 		Status:      task.Status,
 		CreatedAt:   task.CreatedAt,
 		UpdatedAt:   task.UpdatedAt,
+	}
+
+	if task.DueDate != nil {
+		s := task.DueDate.Format("2006-01-02")
+		dto.DueDate = &s
 	}
 
 	if task.Recurrence != nil {

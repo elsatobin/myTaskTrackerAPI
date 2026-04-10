@@ -24,6 +24,7 @@ func NewRouter(taskHandler *httphandlers.TaskHandler, docsHandler *swaggerdocs.H
 	api.HandleFunc("/tasks/{id:[0-9]+}", taskHandler.Update).Methods(http.MethodPut)
 	api.HandleFunc("/tasks/{id:[0-9]+}", taskHandler.Delete).Methods(http.MethodDelete)
 	api.HandleFunc("/tasks/{id:[0-9]+}/occurrences", taskHandler.Occurrences).Methods(http.MethodGet)
+	api.HandleFunc("/tasks/{id:[0-9]+}/expand", taskHandler.Expand).Methods(http.MethodPost)
 
 	return router
 }
