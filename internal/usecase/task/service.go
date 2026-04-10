@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	taskdomain "example.com/taskservice/internal/domain/task"
+	domain "example.com/taskservice/internal/domain/task"
 )
 
 type Service struct {
@@ -21,30 +21,26 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Task, error) {
+func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.Task, error) {
 	normalized, err := validateCreateInput(input)
 	if err != nil {
 		return nil, err
 	}
 
-	model := &taskdomain.Task{
+	now := s.now()
+	model := &domain.Task{
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
-	}
-	now := s.now()
-	model.CreatedAt = now
-	model.UpdatedAt = now
-
-	created, err := s.repo.Create(ctx, model)
-	if err != nil {
-		return nil, err
+		Recurrence:  normalized.Recurrence,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
-	return created, nil
+	return s.repo.Create(ctx, model)
 }
 
-func (s *Service) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
+func (s *Service) GetByID(ctx context.Context, id int64) (*domain.Task, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
 	}
@@ -52,7 +48,7 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*taskdomain.Task, erro
 	return s.repo.GetByID(ctx, id)
 }
 
-func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*taskdomain.Task, error) {
+func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*domain.Task, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
 	}
@@ -62,20 +58,16 @@ func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*tas
 		return nil, err
 	}
 
-	model := &taskdomain.Task{
+	model := &domain.Task{
 		ID:          id,
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
+		Recurrence:  normalized.Recurrence,
 		UpdatedAt:   s.now(),
 	}
 
-	updated, err := s.repo.Update(ctx, model)
-	if err != nil {
-		return nil, err
-	}
-
-	return updated, nil
+	return s.repo.Update(ctx, model)
 }
 
 func (s *Service) Delete(ctx context.Context, id int64) error {
@@ -86,8 +78,47 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
+func (s *Service) List(ctx context.Context) ([]domain.Task, error) {
 	return s.repo.List(ctx)
+}
+
+// Occurrences returns all scheduled dates for a task in the given date range.
+// from and to are expected as "2006-01-02" (date only).
+func (s *Service) Occurrences(ctx context.Context, id int64, from, to string) ([]string, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+	}
+
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if task.Recurrence == nil {
+		return []string{}, nil
+	}
+
+	fromT, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid from date: %s", ErrInvalidInput, from)
+	}
+
+	toT, err := time.Parse("2006-01-02", to)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid to date: %s", ErrInvalidInput, to)
+	}
+
+	if toT.Before(fromT) {
+		return nil, fmt.Errorf("%w: to must be >= from", ErrInvalidInput)
+	}
+
+	dates := task.Recurrence.Occurrences(fromT, toT)
+	result := make([]string, len(dates))
+	for i, d := range dates {
+		result[i] = d.Format("2006-01-02")
+	}
+
+	return result, nil
 }
 
 func validateCreateInput(input CreateInput) (CreateInput, error) {
@@ -99,11 +130,17 @@ func validateCreateInput(input CreateInput) (CreateInput, error) {
 	}
 
 	if input.Status == "" {
-		input.Status = taskdomain.StatusNew
+		input.Status = domain.StatusNew
 	}
 
-	if !input.Status.Valid() {
+	if !input.Status.IsValid() {
 		return CreateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
+	}
+
+	if input.Recurrence != nil {
+		if err := input.Recurrence.Validate(); err != nil {
+			return CreateInput{}, fmt.Errorf("%w: %s", ErrInvalidInput, err)
+		}
 	}
 
 	return input, nil
@@ -117,8 +154,18 @@ func validateUpdateInput(input UpdateInput) (UpdateInput, error) {
 		return UpdateInput{}, fmt.Errorf("%w: title is required", ErrInvalidInput)
 	}
 
-	if !input.Status.Valid() {
+	if input.Status == "" {
+		input.Status = domain.StatusNew
+	}
+
+	if !input.Status.IsValid() {
 		return UpdateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
+	}
+
+	if input.Recurrence != nil {
+		if err := input.Recurrence.Validate(); err != nil {
+			return UpdateInput{}, fmt.Errorf("%w: %s", ErrInvalidInput, err)
+		}
 	}
 
 	return input, nil

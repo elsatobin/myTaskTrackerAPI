@@ -1,6 +1,10 @@
 package task
 
-import "time"
+import (
+	"time"
+
+	"example.com/taskservice/internal/domain/recurrence"
+)
 
 type Status string
 
@@ -10,20 +14,21 @@ const (
 	StatusDone       Status = "done"
 )
 
-type Task struct {
-	ID          int64     `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      Status    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-func (s Status) Valid() bool {
+func (s Status) IsValid() bool {
 	switch s {
 	case StatusNew, StatusInProgress, StatusDone:
 		return true
 	default:
 		return false
 	}
+}
+
+type Task struct {
+	ID          int64
+	Title       string
+	Description string
+	Status      Status
+	Recurrence  *recurrence.Recurrence
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
