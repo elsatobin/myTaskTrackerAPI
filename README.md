@@ -1,205 +1,119 @@
-# Task Tracker API – Recurring Tasks Extension
+# Task Tracker API — Recurring Tasks
 
-## 📌 Overview
+A task management REST API built in Go with clean architecture. This extension adds recurrence support to tasks.
 
-This service is a Task Tracker API built with Go and Clean Architecture.
-It is used in a medical information system where doctors manage daily operational tasks such as patient calls, rounds, and reporting.
+## Running
 
-This extension adds support for **recurring tasks**, allowing tasks to be automatically generated based on predefined recurrence rules.
+```bash
+docker-compose up
+```
 
----
+The API is available at `http://localhost:8081`. Swagger UI at `http://localhost:8081/swagger/`.
 
-## 🎯 Goal of the Feature
+Migrations must be applied in order:
 
-The system must allow users to define recurrence rules for tasks so that tasks are automatically created in the system based on those rules.
-
-Supported scenarios:
-
-- Daily recurring tasks (every N days)
-- Monthly recurring tasks (specific days of month)
-- Tasks on specific dates
-- Tasks on even/odd days of month
+```
+migrations/0001_create_tasks.up.sql
+migrations/0002_add_recurrence_to_tasks.up.sql
+```
 
 ---
 
-## 🧠 Key Design Decision
+## Recurrence Feature
 
-### Separation of Concerns
+### Design decisions and assumptions
 
-We separate two concepts:
+**Recurrence is stored on the task itself (JSONB column), not as a separate table.**
 
-- **Task** → a single executable unit of work
-- **RecurrenceRule** → defines how tasks are generated over time
+The task requirements describe recurrence as a *setting* on a task, not a separate entity. Keeping it embedded avoids a join on every read, keeps the model simple, and is easy to extend. A separate `recurrence_rules` table would make sense if rules were shared across many tasks — that's not the case here.
 
-### Why this approach?
+**No background scheduler — occurrences are computed on demand.**
 
-- Keeps Task entity simple and stable
-- Makes recurrence logic reusable and extensible
-- Avoids duplication of scheduling logic inside Task
+The task says "tasks in the tracker should be created taking these settings into account." I interpreted this as: the recurrence config is stored with the task, and the system can tell you *when* that task is scheduled to occur. A background process that auto-creates duplicate task rows every day would add operational complexity (idempotency keys, deduplication, cron management) without clear benefit for the stated use cases. The `/occurrences` endpoint gives the client full visibility into the schedule.
 
----
+**`start_date` is required; `end_date` is optional.** Without a start date, daily/even-odd recurrences have no anchor point. Without an end date, the recurrence is open-ended (valid for many real-world cases like daily patient calls).
 
-## 🧩 Domain Model
+**Day-of-month values are capped at 30 (not 31).** The requirement explicitly states "from 1 to 30". Days that don't exist in a given month (e.g. day 30 in February) are silently skipped.
 
-### Task
-
-- ID
-- Title
-- Description
-- Status
-- DueDate
-- RecurrenceRuleID (optional)
+**Dates use `YYYY-MM-DD` format throughout the API.** Time-of-day is irrelevant for scheduling purposes.
 
 ---
 
-### RecurrenceRule
+## Recurrence types
 
-Defines how tasks should be generated.
-
-Fields:
-
-- ID
-- Type:
-  - daily
-  - monthly
-  - specific_dates
-  - even_odd
-- Interval (for daily recurrence)
-- DaysOfMonth (for monthly recurrence)
-- SpecificDates (list of exact dates)
-- EvenOdd (even / odd rule)
-- StartDate
-- EndDate (optional)
+| Type | Required fields | Description |
+|---|---|---|
+| `daily` | `interval` (>= 1), `start_date` | Every N days starting from start_date |
+| `monthly` | `days_of_month` (1–30), `start_date` | On specific days of each month |
+| `specific_dates` | `specific_dates` (list), `start_date` | Only on the listed dates |
+| `even_odd` | `even_odd` ("even"/"odd"), `start_date` | Even or odd days of the month |
 
 ---
 
-## 🔄 Recurrence Types
+## API
 
-### 1. Daily
+### Create task with recurrence
 
-Task is generated every N days based on interval.
+```
+POST /api/v1/tasks
+```
 
-Example:
-- Every 1 day (daily)
-- Every 2 days
+```json
+{
+  "title": "Daily patient calls",
+  "description": "Call all patients on the ward",
+  "recurrence": {
+    "type": "daily",
+    "interval": 1,
+    "start_date": "2026-04-01",
+    "end_date": "2026-12-31"
+  }
+}
+```
 
----
+Other recurrence examples:
 
-### 2. Monthly
+```json
+{ "type": "monthly", "days_of_month": [1, 15], "start_date": "2026-04-01" }
+{ "type": "specific_dates", "specific_dates": ["2026-04-10", "2026-04-20"], "start_date": "2026-04-01" }
+{ "type": "even_odd", "even_odd": "even", "start_date": "2026-04-01" }
+```
 
-Task is generated on specific days of month.
+### Get scheduled occurrences
 
-Example:
-- 1st, 15th, 30th of each month
+```
+GET /api/v1/tasks/{id}/occurrences?from=2026-04-01&to=2026-04-30
+```
 
----
+Response:
 
-### 3. Specific Dates
+```json
+{
+  "dates": ["2026-04-01", "2026-04-03", "2026-04-05", "..."]
+}
+```
 
-Task is generated only on predefined dates.
+Returns an empty array for tasks without recurrence.
 
-Example:
-- 2026-04-10
-- 2026-04-20
+### Other endpoints
 
----
+```
+GET    /api/v1/tasks
+GET    /api/v1/tasks/{id}
+PUT    /api/v1/tasks/{id}
+DELETE /api/v1/tasks/{id}
+```
 
-### 4. Even / Odd Days
-
-Task is generated only on even or odd day numbers.
-
-Example:
-- Even: 2, 4, 6...
-- Odd: 1, 3, 5...
-
----
-
-## ⚙️ Task Generation Strategy
-
-A **scheduler-based approach** is used.
-
-A background process runs once per day and evaluates all recurrence rules.
-
-### Flow:
-
-1. Load all active recurrence rules
-2. Check if each rule matches the current date
-3. If matched → create a task
-4. Ensure no duplicate tasks are created
-
----
-
-## 🧠 Why Scheduler-Based Approach
-
-We chose a scheduler instead of on-demand generation because:
-
-- Predictable and consistent behavior
-- Avoids side effects during API reads
-- Easier to scale and debug
-- Clean separation between API and background processing
+Task statuses: `new`, `in_progress`, `done`.
 
 ---
 
-## ⚠️ Assumptions
+## Edge cases handled
 
-Since requirements are not fully specified, the following assumptions were made:
-
-- Tasks are generated once per day
-- System timezone is UTC
-- Invalid calendar dates are ignored (e.g. Feb 30)
-- Recurrence requires a valid start date
-- End date limits task generation
-- Each task is generated only once (idempotent behavior)
-
----
-
-## 🚧 Edge Cases Considered
-
-- Leap years (Feb 29 handling)
-- Months with fewer than 31 days
-- Duplicate task prevention
-- Invalid recurrence configuration
-- Timezone consistency
-
----
-
-## 🔁 Idempotency
-
-Task generation is idempotent.
-
-This ensures that:
-
-- Running the scheduler multiple times does not create duplicates
-- Each task is uniquely tied to (rule + date)
-
----
-
-## 🧪 Testing Strategy
-
-- Unit tests for recurrence logic
-- Tests per recurrence type
-- Integration tests for task generation flow
-- Edge case validation tests
-
----
-
-## 📈 Future Improvements
-
-- Add recurrence preview endpoint
-- Add audit logging for task generation
-- Support user-specific recurrence ownership
-- Support cron-expression-based recurrence
-- Replace scheduler with queue-based processing (e.g. worker system)
-
----
-
-## 📌 Summary
-
-This solution focuses on:
-
-- Clean architecture compliance
-- Maintainability and scalability
-- Predictable background processing
-- Extensible recurrence model
-
-The design ensures that new recurrence types can be added without modifying core task logic.
+- Months shorter than the requested day (e.g. day 30 in February) — skipped
+- `end_date` before `start_date` — rejected with 400
+- `interval < 1` for daily — rejected with 400
+- `even_odd` value other than "even"/"odd" — rejected with 400
+- `specific_dates` recurrence with empty list — rejected with 400
+- `to` before `from` in occurrences query — rejected with 400
+- Tasks without recurrence return `"recurrence": null` and empty occurrences list
